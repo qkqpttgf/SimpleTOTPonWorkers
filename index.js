@@ -18,7 +18,7 @@ export default {
     if (url.pathname == "/") {
       if (!validuser) return loginpage();
       if (request.method == "GET") {
-        return await listpage(env);
+        return await listpage(env.FAKV);
       }
       if (request.method == "POST") {
         let data = Object.fromEntries(await request.formData());
@@ -60,24 +60,23 @@ export default {
     }
     if (url.pathname == "/check") {
       if (!validuser) return backpage();
-      let tmp = url.search.substring(1).split("&");
-      let query = new Object();
-      tmp.forEach(t => {
-        let q = t.split("=");
-        query[q[0]] = q[1];
-      });
-      let res = "";
-      if (query["s"]) {
-        try {
-          res = await generateTOTP(query["s"]);
-          await savesecret(env, query["s"]);
-          return new Response(res, htmlhead());
-        } catch (error) {
-          return new Response(error + " " + query["s"], htmlhead(400));
+      try {
+        let tmp = await request.json();
+        if (tmp["s"]) {
+          let totp = new URL(tmp["s"]);
+          let secret = totp.searchParams.get('secret');
+          if (secret) {
+            let res = await generateTOTP(secret);
+            await saveOTP(env.FAKV, tmp["s"]);
+            return new Response(res, htmlhead());
+          } else {
+            return new Response("no secret", htmlhead());
+          }
+        } else {
+          return new Response("no otp", htmlhead());
         }
-      } else {
-        res = "no secret: " + url.search;
-        return new Response(htmlbody("", res), htmlhead());
+      } catch (error) {
+        return new Response(error + " " + request.text(), htmlhead(400));
       }
     }
     return new Response(htmlbody("", s), htmlhead());
@@ -137,7 +136,7 @@ async function loginsucces(name, pass) {
 }
 async function checkcookie(cookie, env) {
   let a = cookie.split("@");
-  if (Date.now() - a[1] > 60 * 60 * 1000) return false;
+  if (Date.now() - a[1] > 30 * 60 * 1000) return false;
   let c = await md5(env.AdminName + ":" + env.AdminPass + "@" + a[1]);
   if (a[0] == c) return true;
   return false;
@@ -186,11 +185,7 @@ function addpage() {
         let t = 30 - Math.floor(Date.now() / 1000) % 30;
         if (document.getElementById("code").textContent != "") document.getElementById("countdown").innerHTML = t;
         else document.getElementById("countdown").innerHTML = "";
-        if (t == 1) {
-            document.getElementById("code").textContent = "";
-            document.getElementById("countdown").innerHTML = "";
-        }
-        if (t == 29) {
+        if (t == 30) {
             //clearInterval(countdown);
             refresh();
         }
@@ -198,19 +193,19 @@ function addpage() {
     // 扫码成功回调
     function onScanSuccess(decodedText, decodedResult) {
         if (scaning) return;
-        html5QrcodeScanner.clear();
         scaning = true;
+        html5QrcodeScanner.clear();
         // 如果是链接直接跳转：location.href = decodedText;
         if (/^otpauth?:\\/\\//.test(decodedText)) {
-            let otp = new URL(decodedText);
-            let q = new Object();
-            otp.search.substring(1).split("&").forEach(q1 => {
-                let q2 = q1.split("=");
-                q[q2[0]] = q2[1];
-            });
-            document.getElementById('result').innerText = q["secret"];
-            refresh();
+            let totp = new URL(decodedText);
+            let secret = totp.searchParams.get('secret');
+            if (secret) {
+                document.getElementById('result').innerText = decodedText;
+                refresh();
+                scaning = false;
+            }
         }
+        if (scaning) document.getElementById("error").innerHTML = "似乎不是TOTP二维码";
     }
     // 扫码失败（持续扫描中会频繁触发，一般只打印）
     function onScanFailure(error) {
@@ -218,9 +213,13 @@ function addpage() {
     }
     // 刷新用
     function refresh() {
-        let secret = document.getElementById("result").textContent;
-        if (secret == "") return;
-        fetch("/check?s=" + secret).then(res => {
+        let totp = document.getElementById("result").textContent;
+        if (totp == "") return;
+        fetch("/check", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", },
+            body: JSON.stringify({ "s": totp, }),
+        }).then(res => {
             if (!res.ok) {
                 res.text().then(t => {
                     document.getElementById("error").innerHTML = res.status + t;
@@ -266,10 +265,11 @@ async function getKVdata(kv) {
       let t1 = await kv.get(label);
       if (t1) {
         let t = JSON.parse(t1);
+        let totp = new URL(t.totp);
+        let secret = totp.searchParams.get('secret');
         let name = t.name;
-        if (!name) name = label;
-        let secret = t.secret;
-        if (name && secret) {
+        if (!name) name = totp.pathname.substring(1);
+        if (secret) {
           let code = await generateTOTP(secret);
           let tmp = new Object();
           tmp["label"] = label;
@@ -282,11 +282,66 @@ async function getKVdata(kv) {
   }
   return arr;
 }
-async function listpage(env) {
+async function listpage(kv) {
   let s = `<style>
   .code {
     font-size: 28px;
     margin: 10px;
+  }
+
+  .progress-circle {
+    --percent: 30;
+    /* 百分数 */
+    --size: 20px;
+    /* 尺寸大小 */
+    --border-width: 10px;
+    /* 环宽（粗细） */
+    --color: #7856d7;
+    /* 主色 */
+    --inactive-color: #ccc;
+    /* 辅助色 */
+
+    position: relative;
+    width: var(--size);
+    height: var(--size);
+    border-radius: 50%;
+    display: inline-block;
+  }
+
+  /* 百分数文本 */
+  .progress-circle::before {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    counter-reset: progress var(--percent);
+    content: counter(progress);
+    white-space: nowrap;
+    font-size: 12px;
+  }
+
+  /* SVG 容器 */
+  .progress-circle>svg {
+    width: 100%;
+    height: 100%;
+    transform: rotate(-90deg);
+  }
+
+  /* 进度条圆环 */
+  .progress-circle circle {
+    --r: calc((var(--size) - var(--border-width)) / 2);
+    cx: calc(var(--size) / 2);
+    cy: calc(var(--size) / 2);
+    r: var(--r);
+    fill: none;
+    stroke-width: var(--border-width);
+    stroke-linecap: butt;
+    transition: stroke-dasharray .4s linear, stroke .3s;
+  }
+
+  /* 优化：进度为0时隐藏进度条 */
+  .progress-value {
+    opacity: var(--percent);
   }
 
   .mask {
@@ -311,36 +366,67 @@ async function listpage(env) {
   }
 </style>
 <a href="/add">添加</a><br>
-<table id="ctn"></table>
+<br>
+<div id="ctn"></div>
+<div id="model" style="display: none;">
+  <div class="progress-circle">
+    <svg>
+      <circle stroke="var(--inactive-color)" />
+      <circle stroke="var(--color)" class="progress-value" style="stroke-dasharray: calc(2 * PI * var(--r) * (var(--percent) / 30)), 1000" />
+    </svg>
+  </div>
+</div>
 <script>
-  var codes = ` + JSON.stringify(await getKVdata(env.FAKV)) + `;
-  var containor = document.getElementById("ctn");
-  var needfresh = true;
-  var countdown = setInterval(() => {
-    let t = 30 - Math.floor(Date.now() / 1000) % 30;
-    document.querySelectorAll(".countdown").forEach(c => {
-      c.textContent = t;
-    });
-    if (t == 29) location.reload(true);
-  }, 1000);
+  const timestramp = ` + Date.now() / 1000 + `;
+  const codes = ` + JSON.stringify(await getKVdata(kv)) + `;
+  const containor = document.getElementById("ctn");
+  const progressmodel = document.getElementById("model").children[0];
+  function changeDemo(value, property, unit = '') {
+    document.querySelector('.progress-circle').style.setProperty(property, value + unit);
+  }
+  var CountDown;
+  countdown();
+  function countdown(stop) {
+    if (stop) {
+      clearTimeout(CountDown);
+    } else {
+      CountDown = setTimeout(() => {
+        let t = 300 - Math.floor(Date.now() / 100) % 300;
+        changeDemo(t / 10, '--percent');
+        //document.querySelectorAll(".countdown").forEach(c => {
+        //  c.textContent = t;
+        //});
+        if (t > 298 || (timestramp % 30) > 29 || Date.now() / 1000 - timestramp > 30) {
+          document.querySelectorAll(".code").forEach(c => {
+            c.textContent = "";
+          });
+          location.reload(true);
+        }
+        countdown();
+      }, 100);
+    }
+  }
   codes.forEach(code => {
-    let d = document.createElement("tr");
+    let d = document.createElement("div");
     containor.appendChild(d);
-    let n = document.createElement("td");
+    let n = document.createElement("div");
     n.id = code["label"];
     n.textContent = code["name"];
     n.setAttribute("onclick", "editname(this);");
     d.appendChild(n);
-    let c = document.createElement("td");
+    let d1 = document.createElement("div");
+    d.appendChild(d1);
+    //let c1 = document.createElement("span");
+    //c1.className = "countdown";
+    //d1.appendChild(c1);
+    d1.appendChild(progressmodel.cloneNode(true));
+    let c = document.createElement("span");
     c.className = "code";
     c.textContent = code["code"];
-    d.appendChild(c);
-    let c1 = document.createElement("td");
-    c1.className = "countdown";
-    d.appendChild(c1);
+    d1.appendChild(c);
   });
   function editname(btn) {
-    clearInterval(countdown);
+    countdown(1);
     const mask = document.createElement("div");
     mask.className = "mask";
     document.body.appendChild(mask);
@@ -373,6 +459,7 @@ async function listpage(env) {
     mask.addEventListener("click", e => {
       if (toast.contains(e.target)) return;
       mask.remove();
+      countdown();
     });
   }
 </script>
@@ -387,18 +474,18 @@ async function editlabel(kv, label, name) {
   await kv.put(label, JSON.stringify(tmp1));
   return true;
 }
-async function savesecret(env, secret) {
+async function saveOTP(kv, totp) {
   let exist = false;
-  let list = await env.FAKV.get("TOTPList");
+  let list = await kv.get("TOTPList");
   let list1 = new Array();
   if (list) {
     list1 = JSON.parse(list);
     for (let i = 0; i < list1.length; i++) {
       let label = list1[i];
-      let t = await env.FAKV.get(label);
+      let t = await kv.get(label);
       if (t) {
         t = JSON.parse(t);
-        if (secret === t["secret"]) exist = true;
+        if (totp === t["totp"]) exist = true;
       }
     }
   }
@@ -406,9 +493,9 @@ async function savesecret(env, secret) {
   let label = Date.now();
   list1.push(label);
   let t = new Object();
-  t["secret"] = secret;
-  await env.FAKV.put("TOTPList", JSON.stringify(list1));
-  await env.FAKV.put(label, JSON.stringify(t));
+  t["totp"] = totp;
+  await kv.put("TOTPList", JSON.stringify(list1));
+  await kv.put(label, JSON.stringify(t));
 }
 
 //----------------------------------------------------------------

@@ -95,6 +95,7 @@ function htmlbody(title, body) {
   let html = `
 <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1"></meta>
+<link rel="icon" href="data:,">
 <title>` + title + `</title>
 <body>
 ` + body + `
@@ -285,6 +286,11 @@ async function listpage(kv) {
   let s = `<style>
   #ctn {
     margin: 1em;
+    width: fit-content;
+  }
+
+  span[title] {
+    cursor: pointer;
   }
 
   .code {
@@ -416,7 +422,7 @@ async function listpage(kv) {
   codes.forEach(code => {
     let d = document.createElement("div");
     containor.appendChild(d);
-    let n = document.createElement("div");
+    let n = document.createElement("span");
     n.id = code["label"];
     n.textContent = code["name"];
     n.title = "修改名称";

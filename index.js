@@ -30,32 +30,20 @@ export default {
         }
       }
     }
-    if (url.pathname == "/login") {
-      if (request.method == "GET") {
-        return loginpage();
-      }
+    if (url.pathname == "/login") {//&& url.searchParams.get('secret')
       if (request.method == "POST") {
         //await request.json() await request.text() await request.formData();
         let data = Object.fromEntries(await request.formData());
         if (data.name == env.AdminName && data.pass == env.AdminPass) {
           return await loginsucces(data.name, data.pass);
-        } else {
-          return loginpage();
         }
       }
+      return loginpage();
     }
     if (url.pathname == "/add") {
       if (!validuser) return backpage();
       if (request.method == "GET") {
         return addpage();
-      }
-      if (request.method == "POST") {
-        let data = Object.fromEntries(await request.formData());
-        if (data.name == env.AdminName && data.pass == env.AdminPass) {
-          return await loginsucces(data.name, data.pass);
-        } else {
-          return addpage();
-        }
       }
     }
     if (url.pathname == "/check") {
@@ -79,7 +67,18 @@ export default {
         return new Response(error + " " + request.text(), htmlhead(400));
       }
     }
-    return new Response(htmlbody("", s), htmlhead());
+    if (url.pathname == "/del") {
+      if (!validuser) return backpage();
+      if (request.method == "POST") {
+        let data = Object.fromEntries(await request.formData());
+        if (data.label) {
+          let r = await delOTP(env.FAKV, data.label);
+          if (!r) return backpage(200, "成功");
+          else return backpage();
+        }
+      }
+    }
+    return new Response(htmlbody("", s), htmlhead(400));
   }
 }
 function htmlhead(stat, head) {
@@ -111,11 +110,11 @@ function loginpage() {
   <button>确认</button>
   </form>
   `;
-  return new Response(htmlbody(title, html), htmlhead());
+  return new Response(htmlbody(title, html), htmlhead(401));
 }
 function backpage(stat, msg) {
-  if (!stat) stat = 401;
-  if (!msg) msg = "出错";
+  if (!stat) stat = 400;
+  if (msg == null) msg = "出错";
   let s = `<meta http-equiv="refresh" content="3;URL=/">` + msg;
   return new Response(htmlbody(msg, s), htmlhead(stat));
 }
@@ -284,9 +283,12 @@ async function getKVdata(kv) {
 }
 async function listpage(kv) {
   let s = `<style>
+  #ctn {
+    margin: 1em;
+  }
+
   .code {
     font-size: 28px;
-    margin: 10px;
   }
 
   .progress-circle {
@@ -314,7 +316,7 @@ async function listpage(kv) {
     top: 50%;
     left: 50%;
     transform: translate(-50%, -50%);
-    counter-reset: progress var(--percent);
+    counter-reset: progress round(down, var(--percent));
     content: counter(progress);
     white-space: nowrap;
     font-size: 12px;
@@ -366,7 +368,6 @@ async function listpage(kv) {
   }
 </style>
 <a href="/add">添加</a><br>
-<br>
 <div id="ctn"></div>
 <div id="model" style="display: none;">
   <div class="progress-circle">
@@ -382,7 +383,9 @@ async function listpage(kv) {
   const containor = document.getElementById("ctn");
   const progressmodel = document.getElementById("model").children[0];
   function changeDemo(value, property, unit = '') {
-    document.querySelector('.progress-circle').style.setProperty(property, value + unit);
+    document.querySelectorAll('.progress-circle').forEach(p => {
+      p.style.setProperty(property, value + unit);
+    });
   }
   var CountDown;
   countdown();
@@ -396,13 +399,17 @@ async function listpage(kv) {
         //document.querySelectorAll(".countdown").forEach(c => {
         //  c.textContent = t;
         //});
-        if (t > 298 || (timestramp % 30) > 29 || Date.now() / 1000 - timestramp > 30) {
+        if (Date.now() / 1000 - timestramp > 30 || t > 297 || timestramp % 30 > 29.5) {
           document.querySelectorAll(".code").forEach(c => {
             c.textContent = "";
           });
-          location.reload(true);
+          setTimeout(() => {
+            location.reload(true);
+          }, 300);
+          countdown(1);
+        } else {
+          countdown();
         }
-        countdown();
       }, 100);
     }
   }
@@ -412,13 +419,18 @@ async function listpage(kv) {
     let n = document.createElement("div");
     n.id = code["label"];
     n.textContent = code["name"];
+    n.title = "修改名称";
     n.setAttribute("onclick", "editname(this);");
+    n.appendChild(makeGearSVG());
     d.appendChild(n);
     let d1 = document.createElement("div");
     d.appendChild(d1);
-    //let c1 = document.createElement("span");
+    let c1 = document.createElement("span");
     //c1.className = "countdown";
-    //d1.appendChild(c1);
+    c1.appendChild(makeDelSVG());
+    c1.title = "删除";
+    c1.setAttribute("onclick", "delConfirm('" + code["label"] + "', '" + code["name"] + "');");
+    d1.appendChild(c1);
     d1.appendChild(progressmodel.cloneNode(true));
     let c = document.createElement("span");
     c.className = "code";
@@ -462,9 +474,69 @@ async function listpage(kv) {
       countdown();
     });
   }
+  function makeDelSVG() {
+    let svgNS = "http://www.w3.org/2000/svg";
+    let svg1 = document.createElementNS(svgNS, "svg");
+    svg1.setAttribute("viewBox", "0 0 1024 1024");
+    svg1.setAttribute("style", "width: 1.2em; height: 1.2em; vertical-align: middle; fill: currentColor; overflow: hidden;");
+    let path1 = document.createElementNS(svgNS, "path");
+    svg1.appendChild(path1);
+    path1.setAttribute("d", "M202.666667 256h-42.666667a32 32 0 0 1 0-64h704a32 32 0 0 1 0 64H266.666667v565.333333a53.333333 53.333333 0 0 0 53.333333 53.333334h384a53.333333 53.333333 0 0 0 53.333333-53.333334V352a32 32 0 0 1 64 0v469.333333c0 64.8-52.533333 117.333333-117.333333 117.333334H320c-64.8 0-117.333333-52.533333-117.333333-117.333334V256z m224-106.666667a32 32 0 0 1 0-64h170.666666a32 32 0 0 1 0 64H426.666667z m-32 288a32 32 0 0 1 64 0v256a32 32 0 0 1-64 0V437.333333z m170.666666 0a32 32 0 0 1 64 0v256a32 32 0 0 1-64 0V437.333333z");
+    path1.setAttribute("fill", "red");
+    return svg1;
+  }
+  function makeGearSVG() {
+    let svgNS = "http://www.w3.org/2000/svg";
+    let svg1 = document.createElementNS(svgNS, "svg");
+    svg1.setAttribute("viewBox", "0 0 1024 1024");
+    svg1.setAttribute("style", "width: 1.2em; height: 1.2em; vertical-align: middle; fill: currentColor; overflow: hidden;");
+    let path1 = document.createElementNS(svgNS, "path");
+    svg1.appendChild(path1);
+    path1.setAttribute("d", "M70.413465 401.901008c25.653859 0.538589 51.10929-5.867789 73.503266-18.482118 21.571919-12.132433 40.280811-30.047614 53.547116-53.036873h0.028347c13.266305-22.989259 19.417562-48.132876 19.16244-72.907983-0.283468-25.625512-7.45521-50.825822-20.749862-72.794597-5.555974-9.156018-7.313476-19.530949-5.58432-29.253903 1.729155-9.807995 6.916621-18.99236 15.250581-25.682205 19.360868-15.534049 39.912302-29.622412 61.455874-42.095007 21.430185-12.387554 43.824161-23.187687 67.011848-32.230317h0.085041c9.921382-3.855166 20.438047-3.770125 29.792492-0.368509 9.382793 3.401617 17.546673 10.11981 22.677445 19.445909 12.359207 22.53571 30.61455 41.357989 52.668364 54.425866 21.260104 12.585982 46.120252 19.814417 72.737903 19.814417s51.477799-7.228435 72.737903-19.814417c22.053815-13.067877 40.309157-31.890156 52.668364-54.425866 5.130772-9.326099 13.294652-16.044292 22.677445-19.445909 9.354446-3.401617 19.899457-3.486657 29.792492 0.368509h0.085041c23.187687 9.042631 45.581663 19.842764 67.011848 32.230317 21.571919 12.472594 42.095006 26.560957 61.455874 42.095007 8.333961 6.689846 13.521426 15.874211 15.250581 25.682205 1.729155 9.722954-0.028347 20.097885-5.58432 29.253903-13.294652 21.968774-20.466394 47.169084-20.749862 72.794597-0.255121 24.746761 5.896136 49.890378 19.190787 72.907983v0.085041c13.237958 22.904219 31.918503 40.791053 53.518769 52.951832 22.45067 12.614328 47.877754 19.020706 73.531613 18.482118 10.630052-0.226774 20.49474 3.486657 28.120031 9.921382 7.710331 6.463072 13.067877 15.562396 14.655299 26.079061 1.842542 12.019046 3.231536 24.321559 4.16698 36.879193 0.963791 12.500941 1.445687 24.916842 1.445687 37.219356s-0.481896 24.746761-1.445687 37.247702c-0.935445 12.529288-2.324438 24.831802-4.16698 36.879194-1.587421 10.488318-6.944967 19.587643-14.655299 26.079061-7.625291 6.406378-17.489979 10.11981-28.120031 9.893035-25.653859-0.538589-51.080943 5.896136-73.531613 18.510464-21.600266 12.16078-40.280811 30.047614-53.518769 52.951833-13.294652 23.017606-19.445909 48.189569-19.190787 72.993024 0.283468 25.625512 7.45521 50.825822 20.749862 72.76625 5.555974 9.184365 7.313476 19.559296 5.58432 29.28225-1.729155 9.807995-6.916621 18.99236-15.250581 25.653858-19.360868 15.534049-39.912302 29.622412-61.455874 42.095007-21.430185 12.415901-43.824161 23.187687-67.011848 32.258664h-0.085041c-9.893035 3.855166-20.438047 3.741778-29.792492 0.368509-9.382793-3.429963-17.546673-10.11981-22.677445-19.445909-12.359207-22.53571-30.61455-41.386336-52.668364-54.425866-21.260104-12.614328-46.120252-19.842764-72.737903-19.842764s-51.477799 7.228435-72.737903 19.842764c-22.053815 13.039531-40.309157 31.890156-52.668364 54.425866-5.130772 9.326099-13.294652 16.015945-22.677445 19.445909-9.382793 3.401617-19.956151 3.486657-29.877533-0.368509l0.028347-0.028347c-23.357768-9.099325-45.723397-19.899457-67.011848-32.201971-21.571919-12.472594-42.123353-26.560957-61.484221-42.123353-8.333961-6.661499-13.521426-15.845864-15.250581-25.653858-1.729155-9.722954 0.028347-20.097885 5.58432-29.28225 13.294652-21.940427 20.466394-47.140737 20.749862-72.76625 0.255121-24.803455-5.896136-49.975418-19.190787-72.993024-13.209611-22.904219-31.918503-40.791053-53.518769-52.951833-22.422323-12.614328-47.877754-19.049053-73.531613-18.482117-10.630052 0.226774-20.49474-3.515004-28.120031-9.921382-7.681984-6.491418-13.067877-15.590743-14.655299-26.079061-1.842542-12.047392-3.231536-24.349906-4.16698-36.879194-0.935445-12.500941-1.41734-24.945189-1.41734-37.247702s0.481896-24.690068 1.41734-37.191009c0.935445-12.557635 2.324438-24.860148 4.16698-36.90754 1.587421-10.516665 6.973314-19.615989 14.655299-26.079061 7.653637-6.434725 17.489979-10.148156 28.120031-9.921382z m94.536596 19.020706c-28.800354 16.214373-61.625955 24.49164-94.848411 23.86801-1.672462 11.055254-2.919721 22.138855-3.741778 33.222456-0.822057 10.998561-1.247259 22.337283-1.24726 33.98782 0 11.678884 0.396855 23.017606 1.24726 34.044513 0.822057 11.083601 2.069317 22.138855 3.741778 33.165763 33.222456-0.595283 66.048057 7.681984 94.848411 23.896357 28.034991 15.760824 52.35655 39.090245 69.676448 69.081165 17.263205 29.877533 25.257004 62.5614 24.916842 94.706677-0.368508 33.137416-9.58122 65.736242-26.702691 94.196434 17.518326 14.031669 36.142177 26.787731 55.729819 38.126453 19.417562 11.225335 39.657181 21.004983 60.605471 29.168863 16.044292-29.055476 39.685528-53.377035 68.23076-70.300077 27.751523-16.441147 60.095228-25.880633 94.59329-25.880634s66.841767 9.439486 94.621637 25.880634c28.516886 16.923043 52.158122 41.216255 68.202413 70.27173 21.090023-8.24892 41.329642-18.000221 60.605471-29.168862 19.587643-11.310375 38.211494-24.066438 55.729819-38.098107-17.12147-28.460193-26.334182-61.059019-26.702691-94.196434-0.340162-32.145277 7.653637-64.829144 24.916842-94.706677 17.319898-29.99092 41.641457-53.320341 69.676448-69.081165 28.800354-16.214373 61.625955-24.49164 94.848411-23.896357 1.672462-11.026907 2.919721-22.110508 3.741778-33.165763 0.850404-11.026907 1.275606-22.365629 1.275607-34.044513 0-11.650537-0.425202-23.017606-1.275607-34.016167-0.822057-11.083601-2.069317-22.138855-3.741778-33.194109-33.222456 0.62363-66.048057-7.653637-94.848411-23.86801-28.006644-15.760824-52.328203-39.090245-69.648101-69.052818l-0.028347 0.028347c-17.263205-29.877533-25.257004-62.5614-24.916842-94.763371 0.368508-33.165762 9.58122-65.764589 26.702691-94.196434-17.518326-14.031669-36.142177-26.787731-55.729819-38.126454-19.275828-11.140295-39.515447-20.919942-60.605471-29.168862-16.044292 29.055476-39.685528 53.377035-68.202413 70.27173-27.779869 16.441147-60.123574 25.880633-94.621637 25.880634s-66.841767-9.439486-94.621637-25.880634c-28.516886-16.894696-52.158122-41.216255-68.202413-70.27173-21.090023 8.24892-41.329642 18.028568-60.605471 29.168862-19.587643 11.338722-38.211494 24.094785-55.729819 38.126454 17.12147 28.431846 26.334182 61.030672 26.702691 94.196434 0.340162 32.145277-7.653637 64.800797-24.916842 94.67833v0.085041c-17.263205 29.90588-41.584764 53.206954-69.676448 69.024471z m347.049939-77.500166c46.545455 0 88.697154 18.878972 119.198317 49.380135 30.529509 30.501163 49.380135 72.652862 49.380135 119.198317 0 46.573801-18.850626 88.697154-49.380135 119.226664-30.501163 30.501163-72.652862 49.380135-119.198317 49.380135s-88.697154-18.878972-119.198317-49.380135c-30.529509-30.529509-49.380135-72.652862-49.380135-119.226664 0-46.545455 18.850626-88.697154 49.380135-119.198317 30.501163-30.501163 72.652862-49.380135 119.198317-49.380135z m88.782195 79.824604c-22.734138-22.734138-54.114052-36.765807-88.782195-36.765807s-66.048057 14.031669-88.782195 36.765807c-22.705791 22.705791-36.765807 54.085705-36.765806 88.753848s14.060016 66.048057 36.765806 88.782195c22.734138 22.705791 54.114052 36.765807 88.782195 36.765806s66.048057-14.060016 88.753848-36.765806c22.734138-22.734138 36.794153-54.114052 36.794153-88.782195s-14.060016-66.048057-36.765806-88.753848z");
+    return svg1;
+  }
+  function delConfirm(label, name) {
+    countdown(1);
+    const mask = document.createElement("div");
+    mask.className = "mask";
+    document.body.appendChild(mask);
+    mask.style.width = document.documentElement.scrollWidth < window.innerWidth ? window.innerWidth : document.documentElement.scrollWidth + 'px';
+    mask.style.height = document.documentElement.scrollHeight < window.innerHeight ? window.innerHeight : document.documentElement.scrollHeight + 'px';
+
+    const toast = document.createElement("form");
+    toast.className = "toast";
+    toast.method = "POST";
+    toast.action = "/del";
+    toast.setAttribute("onsubmit", "return window.confirm('确认删除？');");
+    mask.appendChild(toast);
+    toast.appendChild(document.createTextNode("即将删除：" + name));
+    toast.appendChild(document.createElement("br"));
+    let id = document.createElement("input");
+    id.name = "label";
+    id.type = "hidden";
+    id.value = label;
+    toast.appendChild(id);
+    toast.appendChild(document.createTextNode("请在删除前确认相关网站已经清除或更换本条2FA，"));
+    toast.appendChild(document.createElement("br"));
+    toast.appendChild(document.createTextNode("不然你将无法登录相关网站了。"));
+    toast.appendChild(document.createElement("br"));
+    let b = document.createElement("button");
+    b.textContent = "删除";
+    toast.appendChild(b);
+    toast.style.top = "50vh";
+    toast.style.top = toast.offsetTop - toast.offsetHeight / 2;
+    toast.style.left = (document.documentElement.clientWidth - toast.offsetWidth) / 2;
+
+    mask.addEventListener("click", e => {
+      if (toast.contains(e.target)) return;
+      mask.remove();
+      countdown();
+    });
+
+  }
 </script>
 `;
-  return new Response(htmlbody("", s), htmlhead());
+  return new Response(htmlbody("列表", s), htmlhead());
 }
 async function editlabel(kv, label, name) {
   let tmp = await kv.get(label);
@@ -496,6 +568,21 @@ async function saveOTP(kv, totp) {
   t["totp"] = totp;
   await kv.put("TOTPList", JSON.stringify(list1));
   await kv.put(label, JSON.stringify(t));
+}
+async function delOTP(kv, label) {
+  label = label * 1;
+  let list = await kv.get("TOTPList");
+  if (list) {
+    let list1 = JSON.parse(list);
+    let i = list1.indexOf(label);
+    if (i > -1) {
+      list1.splice(i, 1);
+      await kv.delete(label);
+      await kv.put("TOTPList", JSON.stringify(list1));
+      return 0;
+    }
+  }
+  return 1;
 }
 
 //----------------------------------------------------------------

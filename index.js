@@ -64,7 +64,7 @@ export default {
           return new Response("no otp", htmlhead());
         }
       } catch (error) {
-        return new Response(error + " " + request.text(), htmlhead(400));
+        return new Response(error, htmlhead(400));
       }
     }
     if (url.pathname == "/del") {
@@ -144,113 +144,123 @@ async function checkcookie(cookie, env) {
 function addpage() {
   let s = `<script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
 <style>
-    #reader {
-        width: 100%;
-        max-width: 400px;
-        margin: 20px auto;
-    }
+  #reader {
+    width: 100%;
+    max-width: 400px;
+    margin: 20px auto;
+  }
 
-    #result {
-        display: none;
-    }
+  #result {
+    display: none;
+  }
 
-    #code {
-        text-align: center;
-        font-size: 28px;
-        padding: 10px;
-    }
+  #code {
+    text-align: center;
+    font-size: 28px;
+    padding: 10px;
+  }
 
-    body:has(span[id="code"]:empty) a[back] {
-        display: none;
-    }
+  body:has(span[id="code"]:empty) a[back] {
+    display: none;
+  }
 
-    body:has(span[id="code"]:not(:empty)) a[back] {
-        display: block;
-    }
+  body:has(span[id="code"]:not(:empty)) a[back] {
+    display: block;
+  }
 </style>
 <button onclick="start();">点击开始添加</button>
 <div id="reader"></div>
 <div>
-    <span id="countdown"></span>
-    <span id="result"></span>
-    <span id="code"></span>
+  <span id="countdown"></span>
+  <span id="result"></span>
+  <span id="code"></span>
 </div>
 <a back href="/">在目标网站输入验证码确认成功后按这里返回</a>
 <div id="error"></div>
 
 <script>
-    var html5QrcodeScanner;
-    var scaning = false;
-    var countdown = setInterval(() => {
-        let t = 30 - Math.floor(Date.now() / 1000) % 30;
-        if (document.getElementById("code").textContent != "") document.getElementById("countdown").innerHTML = t;
+  var html5QrcodeScanner;
+  var scaning = false;
+  var CountDown;
+  countdown();
+  function countdown(stop) {
+    if (stop) {
+      clearTimeout(CountDown);
+    } else {
+      CountDown = setTimeout(() => {
+        let t = 300 - Math.floor(Date.now() / 100) % 300;
+        if (document.getElementById("code").textContent != "") document.getElementById("countdown").innerHTML = Math.floor(t / 10);
         else document.getElementById("countdown").innerHTML = "";
-        if (t == 30) {
-            //clearInterval(countdown);
-            refresh();
+        if (t > 297) {
+          document.getElementById("code").textContent = "";
+          setTimeout(() => { refresh(); }, 300);
         }
-    }, 1000);
-    // 扫码成功回调
-    function onScanSuccess(decodedText, decodedResult) {
-        if (scaning) return;
-        scaning = true;
-        html5QrcodeScanner.clear();
-        // 如果是链接直接跳转：location.href = decodedText;
-        if (/^otpauth?:\\/\\//.test(decodedText)) {
-            let totp = new URL(decodedText);
-            let secret = totp.searchParams.get('secret');
-            if (secret) {
-                document.getElementById('result').innerText = decodedText;
-                refresh();
-                scaning = false;
-            }
-        }
-        if (scaning) document.getElementById("error").innerHTML = "似乎不是TOTP二维码";
+        countdown();
+      }, 100);
     }
-    // 扫码失败（持续扫描中会频繁触发，一般只打印）
-    function onScanFailure(error) {
-        // console.warn(error);
-    }
-    // 刷新用
-    function refresh() {
-        let totp = document.getElementById("result").textContent;
-        if (totp == "") return;
-        fetch("/check", {
-            method: "POST",
-            headers: { "Content-Type": "application/json", },
-            body: JSON.stringify({ "s": totp, }),
-        }).then(res => {
-            if (!res.ok) {
-                res.text().then(t => {
-                    document.getElementById("error").innerHTML = res.status + t;
-                });
-                return "";
-            } else {
-                return res.text();
-            }
-        }).then(code => {
-            document.getElementById("code").textContent = code;
-        }).catch(error => {
-            document.getElementById("error").innerHTML = error;
-        });
-    }
-
-    function start() {
+  }
+  // 扫码成功回调
+  function onScanSuccess(decodedText, decodedResult) {
+    if (scaning) return;
+    scaning = true;
+    html5QrcodeScanner.clear();
+    // 如果是链接直接跳转：location.href = decodedText;
+    let reg_schema = new RegExp("^otpauth://");
+    if (reg_schema.test(decodedText)) {
+      let totp = new URL(decodedText);
+      let secret = totp.searchParams.get('secret');
+      if (secret) {
+        document.getElementById('result').innerText = decodedText;
+        refresh();
         scaning = false;
-        document.getElementById('result').innerHTML = "";
-        document.getElementById('code').innerHTML = "";
-        document.getElementById("error").innerHTML = "";
-        html5QrcodeScanner = new Html5QrcodeScanner(
-            "reader",
-            {
-                fps: 10,
-                qrbox: { width: 250, height: 250 },
-                rememberLastUsedCamera: true
-            },
-            false
-        );
-        html5QrcodeScanner.render(onScanSuccess, onScanFailure);
+      }
     }
+    if (scaning) document.getElementById("error").innerHTML = "似乎不是TOTP二维码: " + decodedText;
+  }
+  // 扫码失败（持续扫描中会频繁触发，一般只打印）
+  function onScanFailure(error) {
+    // console.warn(error);
+  }
+  // 刷新用
+  function refresh() {
+    let totp = document.getElementById("result").textContent;
+    if (totp == "") return;
+    fetch("/check", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", },
+      body: JSON.stringify({ "s": totp, }),
+    }).then(res => {
+      if (!res.ok) {
+        res.text().then(t => {
+          document.getElementById("error").innerHTML = "" + res.status + ", " + t;
+        });
+        return "";
+      } else {
+        return res.text();
+      }
+    }).then(code => {
+      document.getElementById("code").textContent = code;
+    }).catch(error => {
+      document.getElementById("error").innerHTML = error;
+    });
+  }
+
+  function start() {
+    scaning = false;
+    document.getElementById('result').innerHTML = "";
+    document.getElementById('code').innerHTML = "";
+    document.getElementById("error").innerHTML = "";
+    html5QrcodeScanner = new Html5QrcodeScanner(
+      "reader",
+      {
+        fps: 10,
+        qrbox: { width: 250, height: 250 },
+        rememberLastUsedCamera: true
+      },
+      false
+    );
+    html5QrcodeScanner.render(onScanSuccess, onScanFailure);
+  }
 </script>
   `;
   return new Response(htmlbody("", s), htmlhead());
@@ -268,7 +278,12 @@ async function getKVdata(kv) {
         let totp = new URL(t.totp);
         let secret = totp.searchParams.get('secret');
         let name = t.name;
-        if (!name) name = totp.pathname.substring(1);
+        if (!name) {
+          let issuer = totp.searchParams.get('issuer');
+          let path = totp.pathname.substring(1).split(":");
+          if (issuer != null && path[0] != issuer) path.unshift(issuer);
+          name = path.join(":");
+        }
         if (secret) {
           let code = await generateTOTP(secret);
           let tmp = new Object();
@@ -289,18 +304,22 @@ async function listpage(kv) {
     width: fit-content;
   }
 
+  #ctn>div {
+    margin: 5px;
+  }
+
   span[title] {
     cursor: pointer;
   }
 
   .code {
-    font-size: 28px;
+    font-size: 36px;
   }
 
   .progress-circle {
     --percent: 30;
     /* 百分数 */
-    --size: 20px;
+    --size: 35px;
     /* 尺寸大小 */
     --border-width: 10px;
     /* 环宽（粗细） */
@@ -406,6 +425,7 @@ async function listpage(kv) {
         //  c.textContent = t;
         //});
         if (Date.now() / 1000 - timestramp > 30 || t > 297 || timestramp % 30 > 29.5) {
+          makeMask();
           document.querySelectorAll(".code").forEach(c => {
             c.textContent = "";
           });
@@ -443,14 +463,17 @@ async function listpage(kv) {
     c.textContent = code["code"];
     d1.appendChild(c);
   });
-  function editname(btn) {
-    countdown(1);
-    const mask = document.createElement("div");
+  function makeMask() {
+    let mask = document.createElement("div");
     mask.className = "mask";
     document.body.appendChild(mask);
     mask.style.width = document.documentElement.scrollWidth < window.innerWidth ? window.innerWidth : document.documentElement.scrollWidth + 'px';
     mask.style.height = document.documentElement.scrollHeight < window.innerHeight ? window.innerHeight : document.documentElement.scrollHeight + 'px';
-
+    return mask;
+  }
+  function editname(btn) {
+    countdown(1);
+    const mask = makeMask();
     const toast = document.createElement("form");
     toast.className = "toast";
     toast.method = "POST";
@@ -484,7 +507,7 @@ async function listpage(kv) {
     let svgNS = "http://www.w3.org/2000/svg";
     let svg1 = document.createElementNS(svgNS, "svg");
     svg1.setAttribute("viewBox", "0 0 1024 1024");
-    svg1.setAttribute("style", "width: 1.2em; height: 1.2em; vertical-align: middle; fill: currentColor; overflow: hidden;");
+    svg1.setAttribute("style", "width: 1.4em; height: 1.4em; fill: currentColor; overflow: hidden;");
     let path1 = document.createElementNS(svgNS, "path");
     svg1.appendChild(path1);
     path1.setAttribute("d", "M202.666667 256h-42.666667a32 32 0 0 1 0-64h704a32 32 0 0 1 0 64H266.666667v565.333333a53.333333 53.333333 0 0 0 53.333333 53.333334h384a53.333333 53.333333 0 0 0 53.333333-53.333334V352a32 32 0 0 1 64 0v469.333333c0 64.8-52.533333 117.333333-117.333333 117.333334H320c-64.8 0-117.333333-52.533333-117.333333-117.333334V256z m224-106.666667a32 32 0 0 1 0-64h170.666666a32 32 0 0 1 0 64H426.666667z m-32 288a32 32 0 0 1 64 0v256a32 32 0 0 1-64 0V437.333333z m170.666666 0a32 32 0 0 1 64 0v256a32 32 0 0 1-64 0V437.333333z");

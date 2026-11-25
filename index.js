@@ -1,7 +1,10 @@
 
 export default {
   async fetch(request, env, ctx) {
-    if (!env.AdminName || !env.AdminPass) return new Response("请在设置中添加变量 AdminName 与 密钥 AdminPass 。");
+    if (!env.AdminName || !env.AdminPass) return new Response(
+      htmlbody("Error", '请在Workers的设置中添加变量 AdminName 与 密钥 AdminPass 。'),
+      htmlhead(500)
+    );
     if (env.FAKV == null) return new Response(
       htmlbody("Error", '请在Workers的设置中将 变量名称 FAKV 绑到目标KV命名空间。'),
       htmlhead(500)
